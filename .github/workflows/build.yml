@@ -24,16 +24,16 @@ jobs:
         with:
           gradle-version: 8.9
 
-      - name: Build release APK
-        run: gradle assembleRelease --no-daemon
+      - name: Build APK
+        run: gradle assembleDebug --no-daemon
 
       - uses: actions/upload-artifact@v4
         with:
           name: SimpleAlarm-apk
-          path: app/build/outputs/apk/release/*.apk
+          path: app/build/outputs/apk/debug/*.apk
 
       - name: Attach to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/release/*.apk
+          files: app/build/outputs/apk/debug/*.apk
