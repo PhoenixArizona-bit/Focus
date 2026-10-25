@@ -8,6 +8,10 @@ import android.os.Bundle
 import android.provider.AlarmClock
 import android.provider.Settings
 import android.widget.Toast
+import android.content.pm.PackageManager
+import androidx.activity.result.contract.ActivityResultContracts
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
@@ -31,12 +35,20 @@ class MainActivity : ComponentActivity() {
 
     private var tick by mutableIntStateOf(0)
 
+    private val notifPerm =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (Build.VERSION.SDK_INT >= 33) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+        val sp = getSharedPreferences("cfg", MODE_PRIVATE)
+        if (Build.VERSION.SDK_INT >= 33 && savedInstanceState == null &&
+            !sp.getBoolean("askedNotif", false) &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            sp.edit().putBoolean("askedNotif", true).apply()
+            notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        Scheduler.scheduleAll(this)
+        try { Scheduler.scheduleAll(this) } catch (e: Exception) { }
         setContent { MaterialTheme(colorScheme = darkColorScheme()) { Screen() } }
     }
 
@@ -79,6 +91,23 @@ class MainActivity : ComponentActivity() {
         var tab by remember { mutableIntStateOf(0) }
         val names = listOf("Alarms", "Focus", "Limits")
         val icons = listOf("⏰", "🎯", "🛡")
+        val ctx = this@MainActivity
+        var crash by remember {
+            mutableStateOf(ctx.getSharedPreferences("cfg", MODE_PRIVATE).getString("crash", null))
+        }
+        crash?.let { text ->
+            AlertDialog(
+                onDismissRequest = { },
+                title = { Text("Last crash (send a screenshot)") },
+                text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text(text, fontSize = 10.sp) } },
+                confirmButton = {
+                    TextButton(onClick = {
+                        ctx.getSharedPreferences("cfg", MODE_PRIVATE).edit().remove("crash").apply()
+                        crash = null
+                    }) { Text("Clear") }
+                }
+            )
+        }
         Scaffold(
             bottomBar = {
                 NavigationBar {
@@ -322,13 +351,16 @@ class MainActivity : ComponentActivity() {
         var usage by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
         val usageOk = remember(t) { Perms.usage(ctx) }
         val overlayOk = remember(t) { Perms.overlay(ctx) }
-        val apps = remember { loadApps() }
+        var apps by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+        LaunchedEffect(Unit) { apps = withContext(Dispatchers.IO) { loadApps() } }
         var pick by remember { mutableStateOf<Pair<String, String>?>(null) }
 
         LaunchedEffect(usageOk) {
             while (true) {
                 if (Perms.usage(ctx)) {
-                    usage = try { Usage.today(ctx).first } catch (e: Exception) { emptyMap() }
+                    usage = withContext(Dispatchers.IO) {
+                        try { Usage.today(ctx).first } catch (e: Exception) { emptyMap<String, Long>() }
+                    }
                 }
                 delay(5000)
             }
